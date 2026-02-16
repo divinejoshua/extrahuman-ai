@@ -16,7 +16,7 @@ You are not allowed to change the style of the text.
 You are not allowed to change the vocabulary of the text.
 You job is to make the text more human and natural by changing the words and phrases to make it more natural and human-like.
 Therefore, the result should not have too much difference from the original text except that it should be more natural and human-like.
-THE RESULT SHOULD BE EXACTLY 5 DISTINCT OPTIONS AS A FLAT JSON ARRAY OF STRINGS (NO OBJECTS, NO NUMBERING, NO EXPLANATIONS).
+THE RESULT SHOULD BE EXACTLY 2 DISTINCT OPTIONS AS A FLAT JSON ARRAY OF STRINGS (NO OBJECTS, NO NUMBERING, NO EXPLANATIONS).
 EACH OPTION SHOULD BE A DISTINCT VARIATION OF THE ORIGINAL TEXT.
 EACH OPTION SHOULD BE NO MORE THAN 10 WORDS MORE OR LESS THAN THE NUMBER OF WORDS IN THE ORIGINAL TEXT.
 FOLLOW THIS WRITING STYLE:
@@ -45,11 +45,12 @@ enlightening, esteemed, shed light, craft, crafting, imagine, realm, game-change
 revolutionize, disruptive, utilize, utilizing, dive deep, tapestry, illuminate, unveil, pivotal, intricate, elucidate, hence, furthermore, realm,
 however, harness, exciting, groundbreaking, cutting-edge, remarkable, it, remains to be seen, glimpse into, navigating, landscape, stark, testament,
 in summary, in conclusion, moreover, boost, skyrocketing, opened up, powerful, inquiries, ever-evolving"
-# IMPORTANT: Review your response and ensure no em dashes!`;
+# IMPORTANT: Review your response and ensure no em dashes!
+# CRITICAL: Each option MUST rewrite the ENTIRE input text. Do NOT truncate, summarize, or omit any paragraphs. Every paragraph in the input must appear (rewritten) in each option.`;
 
 const tonePrompts: Record<string, string> = {
   humanize:
-    "Humanize the following text in its entirety. Each option must cover the COMPLETE text from start to finish, not just the beginning:",
+    "Humanize the following text.",
   formal:
     "Rewrite the following text in a formal, professional tone. Use proper grammar, avoid contractions, and maintain a polished style suitable for business or academic contexts.",
   informal:
@@ -80,19 +81,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const wordCount = text.trim().split(/\s+/).length;
+    const paragraphCount = text.split(/\n\s*\n/).filter((p: string) => p.trim()).length;
+
+    let userPrompt = `${tonePrompts[tone]}\n\nText to rewrite:\n\n${text}`;
+    if (tone === "humanize") {
+      userPrompt += `\n\nThe original text has ${wordCount} words and ${paragraphCount} paragraph(s). Each option in your JSON array MUST be approximately ${wordCount} words and contain all ${paragraphCount} paragraph(s). Do NOT shorten or summarize.`;
+    }
+
     const contents = [
       {
         role: "user" as const,
         parts: [
           {
-            text: `${tonePrompts[tone]}\n\nText to rewrite:\n\n${text}`,
+            text: userPrompt,
           },
         ],
       },
     ];
 
     const config: Record<string, unknown> = {
-      maxOutputTokens: 8192,
+      maxOutputTokens: 1000000,
     };
     if (tone === "humanize") {
       config.systemInstruction = humanizeSystemPrompt;
@@ -109,7 +118,8 @@ export async function POST(req: NextRequest) {
     if (tone === "humanize") {
       const jsonMatch = rawText.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
-        const options = JSON.parse(jsonMatch[0]) as string[];
+        const allOptions = JSON.parse(jsonMatch[0]) as string[];
+        const options = allOptions.slice(0, 2);
         return NextResponse.json({ options });
       }
       return NextResponse.json({ result: rawText });
