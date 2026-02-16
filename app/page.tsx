@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useAuth, UserButton } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 
 const tones = [
   { id: "humanize", label: "Humanize", icon: "🧑" },
@@ -12,6 +14,8 @@ const tones = [
 ];
 
 export default function Home() {
+  const { isSignedIn } = useAuth();
+  const router = useRouter();
   const [inputText, setInputText] = useState("");
   const [results, setResults] = useState<Record<string, { result?: string; options?: string[] }>>({});
   const [selectedOption, setSelectedOption] = useState(0);
@@ -23,6 +27,11 @@ export default function Home() {
 
   useEffect(() => {
     setDarkMode(document.documentElement.classList.contains("dark"));
+    const pendingText = localStorage.getItem("pendingText");
+    if (pendingText) {
+      setInputText(pendingText);
+      localStorage.removeItem("pendingText");
+    }
   }, []);
 
   function toggleTheme() {
@@ -34,6 +43,12 @@ export default function Home() {
 
   async function handleParaphrase() {
     if (!inputText.trim()) return;
+
+    if (!isSignedIn) {
+      localStorage.setItem("pendingText", inputText);
+      router.push("/auth/login");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -81,8 +96,9 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-zinc-950 dark:to-zinc-900">
       <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
-        {/* Theme Toggle */}
-        <div className="mb-4 flex justify-end">
+        {/* Theme Toggle & User */}
+        <div className="mb-4 flex items-center justify-end gap-3">
+          {isSignedIn && <UserButton />}
           <button
             onClick={toggleTheme}
             className="rounded-full bg-white p-2 text-slate-600 shadow-sm transition-colors hover:bg-slate-100 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
