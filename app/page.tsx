@@ -17,8 +17,7 @@ export default function Home() {
   const { isSignedIn } = useAuth();
   const router = useRouter();
   const [inputText, setInputText] = useState("");
-  const [results, setResults] = useState<Record<string, { result?: string; options?: string[] }>>({});
-  const [selectedOption, setSelectedOption] = useState(0);
+  const [results, setResults] = useState<Record<string, string>>({});
   const [selectedTone, setSelectedTone] = useState("humanize");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -52,7 +51,7 @@ export default function Home() {
 
     setLoading(true);
     setError("");
-    setSelectedOption(0);
+    setResults((prev) => { const next = { ...prev }; delete next[selectedTone]; return next; });
 
     try {
       const res = await fetch("/api/paraphrase", {
@@ -61,14 +60,23 @@ export default function Home() {
         body: JSON.stringify({ text: inputText, tone: selectedTone }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
+        const data = await res.json();
         setError(data.error || "Something went wrong.");
-      } else if (data.options) {
-        setResults((prev) => ({ ...prev, [selectedTone]: { options: data.options } }));
-      } else {
-        setResults((prev) => ({ ...prev, [selectedTone]: { result: data.result } }));
+        return;
+      }
+
+      setLoading(false);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        setResults((prev) => ({ ...prev, [selectedTone]: accumulated }));
       }
     } catch {
       setError("Failed to connect to the server.");
@@ -77,10 +85,7 @@ export default function Home() {
     }
   }
 
-  const currentResult = results[selectedTone];
-  const outputOptions = currentResult?.options ?? [];
-  const outputText = currentResult?.result ?? "";
-  const displayText = outputOptions.length > 0 ? outputOptions[selectedOption] : outputText;
+  const displayText = results[selectedTone] ?? "";
 
   async function handleCopy() {
     if (!displayText) return;
@@ -131,7 +136,7 @@ export default function Home() {
           {tones.map((tone) => (
             <button
               key={tone.id}
-              onClick={() => { setSelectedTone(tone.id); setSelectedOption(0); }}
+              onClick={() => setSelectedTone(tone.id)}
               className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-all ${
                 selectedTone === tone.id
                   ? "bg-slate-900 text-white shadow-md dark:bg-white dark:text-black"
@@ -170,33 +175,14 @@ export default function Home() {
               <label className="text-sm font-medium text-slate-700 dark:text-zinc-300">
                 Paraphrased Text
               </label>
-              <div className="flex items-center gap-2">
-                {outputOptions.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    {outputOptions.map((_, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setSelectedOption(i)}
-                        className={`h-6 w-6 rounded-full text-xs font-medium transition-all ${
-                          selectedOption === i
-                            ? "bg-slate-900 text-white dark:bg-white dark:text-black"
-                            : "bg-slate-200 text-slate-600 hover:bg-slate-300 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-                        }`}
-                      >
-                        {i + 1}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {displayText && (
-                  <button
-                    onClick={handleCopy}
-                    className="text-xs font-medium text-slate-500 transition-colors hover:text-slate-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-                  >
-                    {copied ? "Copied!" : "Copy"}
-                  </button>
-                )}
-              </div>
+              {displayText && (
+                <button
+                  onClick={handleCopy}
+                  className="text-xs font-medium text-slate-500 transition-colors hover:text-slate-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  {copied ? "Copied!" : "Copy"}
+                </button>
+              )}
             </div>
             <div className="min-h-[300px] flex-1 rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-800 shadow-sm dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-100">
               {loading ? (

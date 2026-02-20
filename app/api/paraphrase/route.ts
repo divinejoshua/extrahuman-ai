@@ -5,48 +5,36 @@ const ai = new GoogleGenAI({
   apiKey: process.env["GEMINI_API_KEY"],
 });
 
-const humanizeSystemPrompt = `You are a humanizer. You are given a text and you need to humanize it.
-You are not allowed to change the meaning of the text.
-You are not allowed to add any new information to the text.
-You are not allowed to remove any information from the text.
-You are not allowed to change the structure of the text.
-You are not allowed to change the formatting of the text.
-You are not allowed to change the tone of the text.
-You are not allowed to change the style of the text.
-You are not allowed to change the vocabulary of the text.
-You job is to make the text more human and natural by changing the words and phrases to make it more natural and human-like.
-Therefore, the result should not have too much difference from the original text except that it should be more natural and human-like.
-THE RESULT SHOULD BE EXACTLY 2 DISTINCT OPTIONS AS A FLAT JSON ARRAY OF STRINGS (NO OBJECTS, NO NUMBERING, NO EXPLANATIONS).
-EACH OPTION SHOULD BE A DISTINCT VARIATION OF THE ORIGINAL TEXT.
-EACH OPTION SHOULD BE NO MORE THAN 10 WORDS MORE OR LESS THAN THE NUMBER OF WORDS IN THE ORIGINAL TEXT.
-FOLLOW THIS WRITING STYLE:
-• SHOULD use clear, simple language.
-• SHOULD be spartan and informative.
-• SHOULD use short, impactful sentences.
-• SHOULD use active voice; avoid passive voice.
-• SHOULD focus on practical, actionable insights.
-• SHOULD use bullet point lists in social media posts.
-• SHOULD use data and examples to support claims when possible.
-• SHOULD use "you" and "your" to directly address the reader.
-• AVOID using em dashes (—) anywhere in your response. Use only commas, periods, or other standard punctuation.
-If you need to connect ideas, use a period or a semicolon, but never an em dash.
-• AVOID constructions like "...not just this, but also this".
+const humanizeSystemPrompt = `You are a humanizer. Your job is to rewrite text so it sounds natural and human-written.
+
+# ABSOLUTE RULES (override everything else):
+1. OUTPUT LENGTH: Your rewrite MUST match the word count of the original text within ±5 words. This is non-negotiable. Do NOT shorten, condense, or summarize — rewrite every sentence fully.
+2. FULL COVERAGE: Every paragraph in the input MUST appear rewritten in the output. Do NOT skip, merge, or omit any paragraph.
+3. FORMAT: Output plain text only. No JSON, no numbering, no labels, no explanations — just the rewritten text.
+
+# WHAT TO CHANGE:
+- Swap words and phrases for more natural, human-sounding alternatives.
+- Rephrase stiff or robotic sentences to flow more naturally.
+- Use active voice where possible.
+- Use "you" and "your" to directly address the reader where it fits naturally.
+
+# WHAT NOT TO CHANGE:
+- Do not change the meaning of any sentence.
+- Do not add new information.
+- Do not remove any information or shorten any sentence.
+- Do not change the paragraph structure or order.
+
+# STYLE:
+• Use clear, direct language.
+• Use active voice; avoid passive voice.
+• AVOID using em dashes (—). Use commas, periods, or colons instead.
+• AVOID constructions like "not just this, but also this".
 • AVOID metaphors and clichés.
-• AVOID generalizations.
-• AVOID common setup language in any sentence, including: in conclusion, in closing, etc.
-• AVOID output warnings or notes, just the output requested.
-• AVOID unnecessary adjectives and adverbs.
-• AVOID hashtags.
-• AVOID semicolons.
-• AVOID markdown.
-• AVOID asterisks.
-• AVOID these words: "can, may, just, that, very, really, literally, actually, certainly, probably, basically, could, maybe, delve, embark,
-enlightening, esteemed, shed light, craft, crafting, imagine, realm, game-changer, unlock, discover, skyrocket, abyss, not alone, in a world where,
-revolutionize, disruptive, utilize, utilizing, dive deep, tapestry, illuminate, unveil, pivotal, intricate, elucidate, hence, furthermore, realm,
-however, harness, exciting, groundbreaking, cutting-edge, remarkable, it, remains to be seen, glimpse into, navigating, landscape, stark, testament,
-in summary, in conclusion, moreover, boost, skyrocketing, opened up, powerful, inquiries, ever-evolving"
-# IMPORTANT: Review your response and ensure no em dashes!
-# CRITICAL: Each option MUST rewrite the ENTIRE input text. Do NOT truncate, summarize, or omit any paragraphs. Every paragraph in the input must appear (rewritten) in each option.`;
+• AVOID common filler phrases like: in conclusion, in closing, in summary, moreover, furthermore.
+• AVOID hashtags, markdown, and asterisks.
+• AVOID these words: "can, may, just, that, very, really, literally, actually, certainly, probably, basically, could, maybe, delve, embark, enlightening, esteemed, shed light, craft, crafting, imagine, realm, game-changer, unlock, discover, skyrocket, abyss, not alone, in a world where, revolutionize, disruptive, utilize, utilizing, dive deep, tapestry, illuminate, unveil, pivotal, intricate, elucidate, hence, harness, exciting, groundbreaking, cutting-edge, remarkable, remains to be seen, glimpse into, navigating, landscape, stark, testament, boost, skyrocketing, opened up, powerful, inquiries, ever-evolving"
+
+# REMINDER: Count the words in your output before finishing. It MUST be within ±5 words of the original word count. If it is shorter, expand sentences — add natural detail, context, or rephrase concisely-written sentences into fuller ones. Never submit a shorter rewrite.`;
 
 const tonePrompts: Record<string, string> = {
   humanize:
@@ -86,17 +74,13 @@ export async function POST(req: NextRequest) {
 
     let userPrompt = `${tonePrompts[tone]}\n\nText to rewrite:\n\n${text}`;
     if (tone === "humanize") {
-      userPrompt += `\n\nThe original text has ${wordCount} words and ${paragraphCount} paragraph(s). Each option in your JSON array MUST be approximately ${wordCount} words and contain all ${paragraphCount} paragraph(s). Do NOT shorten or summarize.`;
+      userPrompt += `\n\n---\nTARGET WORD COUNT: ${wordCount} words (±5 words). The original has ${paragraphCount} paragraph(s) — all must be present and fully rewritten. Do NOT shorten any sentence or paragraph. Your output must be ${wordCount} words.`;
     }
 
     const contents = [
       {
         role: "user" as const,
-        parts: [
-          {
-            text: userPrompt,
-          },
-        ],
+        parts: [{ text: userPrompt }],
       },
     ];
 
@@ -107,32 +91,31 @@ export async function POST(req: NextRequest) {
       config.systemInstruction = humanizeSystemPrompt;
     }
 
-    const response = await ai.models.generateContent({
+    const stream = await ai.models.generateContentStream({
       model: "gemini-2.0-flash",
       config,
       contents,
     });
 
-    const rawText = response.text ?? "";
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of stream) {
+            const chunkText = chunk.text ?? "";
+            if (chunkText) {
+              controller.enqueue(new TextEncoder().encode(chunkText));
+            }
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
 
-    if (tone === "humanize") {
-      const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        // Sanitize control characters inside JSON string values to prevent parse errors
-        const sanitized = jsonMatch[0].replace(/[\x00-\x1F\x7F]/g, (ch) => {
-          if (ch === "\n") return "\\n";
-          if (ch === "\r") return "\\r";
-          if (ch === "\t") return "\\t";
-          return "";
-        });
-        const allOptions = JSON.parse(sanitized) as string[];
-        const options = allOptions.slice(0, 2);
-        return NextResponse.json({ options });
-      }
-      return NextResponse.json({ result: rawText });
-    }
-
-    return NextResponse.json({ result: rawText });
+    return new Response(readable, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
   } catch (error: unknown) {
     console.error("Paraphrase error:", error);
     const msg =
