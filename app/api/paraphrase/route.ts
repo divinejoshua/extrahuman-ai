@@ -86,10 +86,11 @@ export async function POST(req: NextRequest) {
 
     const config: Record<string, unknown> = {
       maxOutputTokens: 1000000,
+      systemInstruction:
+        tone === "humanize"
+          ? humanizeSystemPrompt
+          : "Output plain text only. No markdown, no asterisks, no bullet points, no bold, no headers, no numbered lists, no escape sequences — just the rewritten text.",
     };
-    if (tone === "humanize") {
-      config.systemInstruction = humanizeSystemPrompt;
-    }
 
     const stream = await ai.models.generateContentStream({
       model: "gemini-2.0-flash",
