@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
+import { withWatchmanAnalytics } from "@/app/services/watchman-analytics/route-wrapper";
 
 const ai = new GoogleGenAI({
   apiKey: process.env["GEMINI_API_KEY"],
@@ -51,7 +52,7 @@ const tonePrompts: Record<string, string> = {
     "Rewrite the following text in an academic tone. Use scholarly language, precise terminology, and a structured approach suitable for research or essays.",
 };
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest): Promise<Response> {
   try {
     const { text, tone } = await req.json();
 
@@ -124,3 +125,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+
+export const POST = withWatchmanAnalytics(handlePost);
