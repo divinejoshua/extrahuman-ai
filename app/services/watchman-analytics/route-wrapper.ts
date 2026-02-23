@@ -57,20 +57,62 @@ export function withWatchmanAnalytics<T extends any[]>(
 
       response = await handler(request, ...args)
 
-      try {
-        const contentType = response.headers.get('content-type') || ''
-        const transferEncoding = response.headers.get('transfer-encoding')
+      const contentType = response.headers.get('content-type') || ''
+      const transferEncoding = response.headers.get('transfer-encoding')
+      const isStreaming = transferEncoding === 'chunked' || contentType.includes('text/plain')
 
-        if (transferEncoding === 'chunked' || contentType.includes('text/plain')) {
-          responseBody = {
-            message: 'Streaming response detected',
-            isStreaming: true,
-            contentType,
+      if (isStreaming && response.body) {
+        // Tee the stream: one goes to the client, one gets buffered for watchman
+        const [clientStream, analyticsStream] = response.body.tee()
+
+        // Fire-and-forget: collect the analytics stream and send to watchman once done
+        ;(async () => {
+          try {
+            const chunks: Uint8Array[] = []
+            const reader = analyticsStream.getReader()
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              if (value) chunks.push(value)
+            }
+            const fullText = new TextDecoder().decode(
+              chunks.reduce((acc, chunk) => {
+                const merged = new Uint8Array(acc.length + chunk.length)
+                merged.set(acc)
+                merged.set(chunk, acc.length)
+                return merged
+              }, new Uint8Array(0))
+            )
+            responseBody = { text: fullText, isStreaming: true, contentType }
+          } catch {
+            responseBody = { message: 'Failed to capture stream', isStreaming: true, contentType }
           }
-        } else {
-          const responseClone = response.clone()
-          responseBody = await responseClone.json()
-        }
+
+          try {
+            const payload = createWatchmanAnalyticsPayload(
+              request,
+              response,
+              startTime,
+              requestBody,
+              responseBody,
+              userData
+            )
+            await sendToWatchman(payload)
+          } catch {
+            // silent fail for analytics
+          }
+        })()
+
+        // Return immediately to the client with the tee'd stream
+        return new Response(clientStream, {
+          status: response.status,
+          headers: response.headers,
+        })
+      }
+
+      try {
+        const responseClone = response.clone()
+        responseBody = await responseClone.json()
       } catch {
         responseBody = { message: 'Non-JSON response' }
       }
